@@ -14,7 +14,7 @@ from __future__ import annotations
 import abc
 import logging
 import os
-from typing import Generic, Optional, TypeVar
+from typing import Generic, Optional, TypeVar, Union
 
 import anthropic
 
@@ -25,29 +25,38 @@ logger = logging.getLogger(__name__)
 # TypeVar for the structured output model each concrete agent returns
 OutputT = TypeVar("OutputT")
 
+# Either a direct API client or an AWS Bedrock client — both expose the same
+# messages.create() interface so agents work without any conditional logic.
+LLMClient = Union[anthropic.Anthropic, anthropic.AnthropicBedrock]
+
 
 class BaseAgent(abc.ABC, Generic[OutputT]):
     """Abstract base for all ops-pilot agents.
 
     Args:
-        client: An ``anthropic.Anthropic`` client instance. If not provided,
-                one is created from ``ANTHROPIC_API_KEY`` in the environment.
-        model:  Claude model ID to use. Defaults to claude-sonnet-4-6.
+        client: An ``anthropic.Anthropic`` or ``anthropic.AnthropicBedrock``
+                client instance. If not provided, an ``anthropic.Anthropic``
+                client is created from ``ANTHROPIC_API_KEY`` in the environment.
+                Use ``shared.llm_client.make_client(cfg)`` to get the right
+                client type based on your config.
+        model:  Model ID to use. For Bedrock, use the full model ID such as
+                ``anthropic.claude-sonnet-4-5-20251001-v1:0``. Defaults to
+                ``claude-sonnet-4-6`` (direct API).
     """
 
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
     def __init__(
         self,
-        client: Optional[anthropic.Anthropic] = None,
+        client: Optional[LLMClient] = None,
         model: Optional[str] = None,
     ) -> None:
         """Initialize the agent with an injected or auto-created LLM client.
 
         No business logic here — only dependency wiring.
         """
-        self.client = client or anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY", "")
+        self.client: LLMClient = client or anthropic.Anthropic(
+            api_key=os.environ.get("ANTHROPIC_API_KEY", "") or None
         )
         self.model = model or self.DEFAULT_MODEL
         self._status: AgentStatus = AgentStatus.PENDING

@@ -27,6 +27,7 @@ load_dotenv()
 
 from providers.factory import make_provider
 from shared.config import OpsPilotConfig, PipelineConfig, load_config
+from shared.llm_client import LLMClient, make_client
 from shared.models import Failure, Severity
 from shared.state_store import StateStore
 from agents.triage_agent import TriageAgent
@@ -71,6 +72,7 @@ def run_pipeline(
     failure: Failure,
     pipeline: PipelineConfig,
     cfg: OpsPilotConfig,
+    client: LLMClient,
     dry_run: bool = False,
 ) -> None:
     """Run Triage → Fix → Notify for a single failure."""
@@ -86,7 +88,7 @@ def run_pipeline(
     hdr("TRIAGE", YELLOW)
     step("triage", "Analysing with Claude…")
     t0 = time.time()
-    triage = TriageAgent(model=cfg.model).run(failure)
+    triage = TriageAgent(client=client, model=cfg.model).run(failure)
 
     sev_color = SEVERITY_COLOR.get(triage.severity, "")
     step("triage", f"Severity: {sev_color}{BOLD}{triage.severity.value.upper()}{RESET}  "
@@ -115,6 +117,7 @@ def run_pipeline(
     step("fix", "Generating code fix + opening draft PR…")
     t0 = time.time()
     fix_agent = FixAgent(
+        client=client,
         model=cfg.model,
         provider=provider,
         demo_mode=not has_code_host,
@@ -128,6 +131,7 @@ def run_pipeline(
     step("notify", f"Sending to {pipeline.slack_channel}…")
     t0 = time.time()
     notify_agent = NotifyAgent(
+        client=client,
         model=cfg.model,
         slack_bot_token=cfg.slack_bot_token,
         slack_webhook_url=cfg.slack_webhook_url,
@@ -154,6 +158,7 @@ def _below_threshold(severity: Severity, threshold: Severity) -> bool:
 
 def watch(cfg: OpsPilotConfig, once: bool = False, dry_run: bool = False) -> None:
     store = StateStore(cfg.state_file)
+    client = make_client(cfg)
 
     print(f"\n{BOLD}ops-pilot{RESET}  —  monitoring {len(cfg.pipelines)} pipeline(s)")
     for p in cfg.pipelines:
@@ -161,7 +166,9 @@ def watch(cfg: OpsPilotConfig, once: bool = False, dry_run: bool = False) -> Non
         print(f"  {CYAN}{p.repo}{RESET}  [{p.provider}]  →  {p.slack_channel}  "
               f"threshold: {threshold_color}{p.severity_threshold.value}{RESET}")
 
+    llm_label = f"bedrock ({cfg.aws_region or 'default region'})" if cfg.has_bedrock else "anthropic"
     print(f"\nSlack: {'bot token' if cfg.slack_bot_token else 'webhook' if cfg.slack_webhook_url else 'console (no token set)'}")
+    print(f"LLM:   {llm_label}")
     print(f"Model: {cfg.model}")
     print(f"\nPolling every {cfg.poll_interval_seconds}s  (Ctrl+C to stop)\n")
 
@@ -193,7 +200,7 @@ def watch(cfg: OpsPilotConfig, once: bool = False, dry_run: bool = False) -> Non
 
                 print(f"{YELLOW}▶ Failure:{RESET} {repo}  [{pipeline.provider}]  commit {commit_sha}  run {run_id}")
                 try:
-                    run_pipeline(failure, pipeline, cfg, dry_run=dry_run)
+                    run_pipeline(failure, pipeline, cfg, client=client, dry_run=dry_run)
                     store.set("runs", processed_key, {
                         "repo": repo,
                         "provider": pipeline.provider,

@@ -88,12 +88,38 @@ class PipelineConfig(BaseModel):
         return self
 
 
+_KNOWN_LLM_PROVIDERS = {"anthropic", "bedrock"}
+
+
 class OpsPilotConfig(BaseModel):
     """Top-level ops-pilot configuration."""
 
-    # LLM
+    # LLM provider selection
+    llm_provider: str = Field(
+        default="anthropic",
+        description="LLM backend: 'anthropic' (direct API key) or 'bedrock' (AWS Bedrock)",
+    )
+
+    # Anthropic direct API
     anthropic_api_key: str = Field(default="")
+
+    # Model — for Bedrock use the full model ID e.g.
+    # 'anthropic.claude-sonnet-4-5-20251001-v1:0' or a cross-region
+    # inference ID like 'us.anthropic.claude-sonnet-4-5-20251001-v1:0'
     model: str = Field(default="claude-sonnet-4-6")
+
+    # AWS Bedrock
+    aws_region: str = Field(
+        default="",
+        description="AWS region for Bedrock, e.g. 'us-east-1'. Falls back to AWS_DEFAULT_REGION.",
+    )
+
+    @field_validator("llm_provider")
+    @classmethod
+    def llm_provider_must_be_known(cls, v: str) -> str:
+        if v not in _KNOWN_LLM_PROVIDERS:
+            raise ValueError(f"llm_provider must be one of {_KNOWN_LLM_PROVIDERS}, got: {v!r}")
+        return v
 
     # GitHub
     github_token: str = Field(default="")
@@ -136,6 +162,10 @@ class OpsPilotConfig(BaseModel):
     def has_anthropic(self) -> bool:
         return bool(self.anthropic_api_key)
 
+    @property
+    def has_bedrock(self) -> bool:
+        return self.llm_provider == "bedrock"
+
 
 def _substitute_env(value: object) -> object:
     """Recursively substitute ${VAR} references with environment variable values."""
@@ -173,6 +203,8 @@ def load_config(path: Optional[str] = None) -> OpsPilotConfig:
     # Environment variables override everything
     env_overrides = {
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+        "llm_provider":      os.environ.get("LLM_PROVIDER", ""),
+        "aws_region":        os.environ.get("AWS_REGION", "") or os.environ.get("AWS_DEFAULT_REGION", ""),
         "github_token":      os.environ.get("GITHUB_TOKEN", ""),
         "gitlab_token":      os.environ.get("GITLAB_TOKEN", ""),
         "jenkins_user":      os.environ.get("JENKINS_USER", ""),
