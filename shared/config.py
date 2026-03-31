@@ -13,19 +13,56 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from shared.models import Severity
+
+_KNOWN_PROVIDERS = {"github_actions", "gitlab_ci", "jenkins"}
+_KNOWN_CODE_HOSTS = {"github", "gitlab"}
 
 
 class PipelineConfig(BaseModel):
     """Configuration for a single monitored repository."""
 
-    repo: str = Field(..., description="owner/repo slug")
+    repo: str = Field(..., description="owner/repo slug (GitHub/GitLab) or code-host repo for Jenkins")
     slack_channel: str = Field(default="#platform-alerts")
     severity_threshold: Severity = Field(
         default=Severity.MEDIUM,
         description="Ignore failures below this severity level",
+    )
+
+    # CI provider
+    provider: str = Field(
+        default="github_actions",
+        description="CI system to poll: github_actions | gitlab_ci | jenkins",
+    )
+    base_branch: str = Field(
+        default="main",
+        description="Branch that fix PRs/MRs are opened against",
+    )
+
+    # Per-pipeline credential overrides (fall back to global config when empty)
+    github_token: str = Field(default="", description="Override global GITHUB_TOKEN")
+    gitlab_token: str = Field(default="", description="Override global GITLAB_TOKEN")
+
+    # GitLab-specific
+    gitlab_url: Optional[str] = Field(
+        default=None,
+        description="GitLab base URL — omit for gitlab.com, set for self-hosted instances",
+    )
+
+    # Jenkins-specific
+    jenkins_url: Optional[str] = Field(
+        default=None,
+        description="Jenkins server base URL, e.g. 'https://ci.example.com'",
+    )
+    jenkins_job: Optional[str] = Field(
+        default=None,
+        description="Jenkins job path, e.g. 'folder/my-job'. Defaults to repo value.",
+    )
+    code_host: Optional[str] = Field(
+        default=None,
+        description="For Jenkins: code hosting provider for git/PR ops — github | gitlab",
     )
 
     @field_validator("repo")
@@ -34,6 +71,21 @@ class PipelineConfig(BaseModel):
         if "/" not in v:
             raise ValueError(f"repo must be 'owner/repo', got: {v!r}")
         return v
+
+    @field_validator("provider")
+    @classmethod
+    def provider_must_be_known(cls, v: str) -> str:
+        if v not in _KNOWN_PROVIDERS:
+            raise ValueError(f"provider must be one of {_KNOWN_PROVIDERS}, got: {v!r}")
+        return v
+
+    @model_validator(mode="after")
+    def jenkins_requires_code_host(self) -> "PipelineConfig":
+        if self.provider == "jenkins" and not self.code_host:
+            raise ValueError("'code_host' is required when provider is 'jenkins' (github or gitlab)")
+        if self.code_host and self.code_host not in _KNOWN_CODE_HOSTS:
+            raise ValueError(f"code_host must be one of {_KNOWN_CODE_HOSTS}, got: {self.code_host!r}")
+        return self
 
 
 class OpsPilotConfig(BaseModel):
@@ -45,6 +97,13 @@ class OpsPilotConfig(BaseModel):
 
     # GitHub
     github_token: str = Field(default="")
+
+    # GitLab
+    gitlab_token: str = Field(default="")
+
+    # Jenkins
+    jenkins_user: str = Field(default="")
+    jenkins_token: str = Field(default="", description="Jenkins API token (not password)")
 
     # Slack — bot token takes priority over webhook URL
     slack_bot_token: str = Field(default="")
@@ -64,6 +123,14 @@ class OpsPilotConfig(BaseModel):
     @property
     def has_github(self) -> bool:
         return bool(self.github_token)
+
+    @property
+    def has_gitlab(self) -> bool:
+        return bool(self.gitlab_token)
+
+    @property
+    def has_jenkins(self) -> bool:
+        return bool(self.jenkins_user and self.jenkins_token)
 
     @property
     def has_anthropic(self) -> bool:
@@ -106,10 +173,13 @@ def load_config(path: Optional[str] = None) -> OpsPilotConfig:
     # Environment variables override everything
     env_overrides = {
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-        "github_token": os.environ.get("GITHUB_TOKEN", ""),
-        "slack_bot_token": os.environ.get("SLACK_BOT_TOKEN", ""),
+        "github_token":      os.environ.get("GITHUB_TOKEN", ""),
+        "gitlab_token":      os.environ.get("GITLAB_TOKEN", ""),
+        "jenkins_user":      os.environ.get("JENKINS_USER", ""),
+        "jenkins_token":     os.environ.get("JENKINS_TOKEN", ""),
+        "slack_bot_token":   os.environ.get("SLACK_BOT_TOKEN", ""),
         "slack_webhook_url": os.environ.get("SLACK_WEBHOOK_URL", ""),
-        "model": os.environ.get("CLAUDE_MODEL", ""),
+        "model":             os.environ.get("CLAUDE_MODEL", ""),
     }
     for key, val in env_overrides.items():
         if val:

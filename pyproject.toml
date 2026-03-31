@@ -48,4 +48,4 @@ addopts = "--cov=agents --cov=shared --cov-report=term-missing --cov-fail-under=
 omit = ["tests/*", "demo/*"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["agents", "shared"]
+packages = ["agents", "shared", "providers"]

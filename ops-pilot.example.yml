@@ -6,35 +6,52 @@
 anthropic_api_key: ${ANTHROPIC_API_KEY}        # required for live mode
 model: claude-sonnet-4-6                        # model to use for all agents
 
-# ── GitHub ────────────────────────────────────────────────────────────────────
+# ── Credentials ───────────────────────────────────────────────────────────────
 github_token: ${GITHUB_TOKEN}                  # classic PAT with repo + workflow scopes
+gitlab_token: ${GITLAB_TOKEN}                  # personal/project token with api scope
+jenkins_user: ${JENKINS_USER}                  # Jenkins username
+jenkins_token: ${JENKINS_TOKEN}                # Jenkins API token (not password)
 
 # ── Slack ─────────────────────────────────────────────────────────────────────
 # Option A — bot token (recommended): one token posts to any channel
-slack_bot_token: ${SLACK_BOT_TOKEN}            # xoxb-... token from api.slack.com/apps
+slack_bot_token: ${SLACK_BOT_TOKEN}            # xoxb-... from api.slack.com/apps
 
 # Option B — incoming webhook (simpler): single channel only
 # slack_webhook_url: ${SLACK_WEBHOOK_URL}
 
 # ── Watcher settings ──────────────────────────────────────────────────────────
-poll_interval_seconds: 30                      # how often to check each repo
+poll_interval_seconds: 30
 state_file: state/ops_pilot_state.json         # persisted across restarts (mount /app/state in Docker)
 
 # ── Pipelines to monitor ──────────────────────────────────────────────────────
-# Add one entry per repo. Each entry can override the global slack channel.
+# Each entry can specify its own provider, Slack channel, and severity threshold.
+
 pipelines:
+  # ── GitHub Actions ──────────────────────────────────────────────────────────
   - repo: myorg/backend
+    provider: github_actions                   # default — can be omitted
     slack_channel: "#platform-alerts"
-    severity_threshold: medium     # ignore failures below this (low/medium/high/critical)
-
-  - repo: myorg/frontend
-    slack_channel: "#frontend-eng"
-    severity_threshold: high
-
-  - repo: myorg/data-pipeline
-    slack_channel: "#data-eng"
-    severity_threshold: low        # catch everything
+    severity_threshold: medium                 # ignore low-severity noise
+    base_branch: main                          # branch fix PRs are opened against
 
   - repo: myorg/payments
+    provider: github_actions
     slack_channel: "#payments-oncall"
+    severity_threshold: high                   # only act on high/critical
+
+  # ── GitLab CI ───────────────────────────────────────────────────────────────
+  - repo: mygroup/frontend                     # GitLab group/project slug
+    provider: gitlab_ci
+    slack_channel: "#frontend-eng"
     severity_threshold: medium
+    # gitlab_url: https://gitlab.mycompany.com  # omit for gitlab.com
+    # gitlab_token: ${GITLAB_TOKEN}             # override global token per-pipeline
+
+  # ── Jenkins (build server + GitHub code host) ────────────────────────────────
+  - repo: myorg/data-pipeline                  # GitHub owner/repo for PRs
+    provider: jenkins
+    code_host: github                          # github | gitlab
+    jenkins_url: https://ci.example.com
+    jenkins_job: pipelines/data-pipeline       # job path within Jenkins
+    slack_channel: "#data-eng"
+    severity_threshold: low                    # catch everything
