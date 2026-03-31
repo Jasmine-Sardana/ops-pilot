@@ -2,7 +2,7 @@
 
 **ops-pilot** is a multi-agent AI system that watches your CI/CD pipelines, automatically diagnoses failures, generates fix patches, and notifies your team — so engineers spend time shipping features, not hunting stack traces.
 
-[Live Demo](https://ops-pilot.onrender.com) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Design Decisions](#design-decisions)
+[Live Demo](https://adnanafik.github.io/ops-pilot/) · [Architecture](#architecture) · [Quickstart](#quickstart) · [Design Decisions](#design-decisions)
 
 ---
 
