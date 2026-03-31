@@ -143,6 +143,22 @@ ops-pilot/
 
 ---
 
+## Claude Code slash commands
+
+If you use [Claude Code](https://claude.ai/code), ops-pilot ships with 5 reusable skill files in `.claude/commands/` that wire Claude directly into the project's conventions:
+
+| Command | What it does |
+|---|---|
+| `/triage <log output>` | Analyze a CI failure and produce a structured triage report (root cause, severity, suggested fix) |
+| `/add-pipeline owner/repo` | Interactively add a new pipeline to `ops-pilot.yml` with provider detection and validation |
+| `/new-provider CircleCI` | Scaffold a full `CIProvider` implementation, wired into the factory and `__init__` |
+| `/run [once\|dry-run\|watch]` | Run the watcher in the specified mode with env pre-checks |
+| `/scenario "Redis timeout in payments"` | Generate a new demo scenario JSON from a failure description |
+
+Each skill reads the actual source files before making changes — not stubs.
+
+---
+
 ## Design decisions
 
 ### Why file-based task locking?
