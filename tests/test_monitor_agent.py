@@ -60,18 +60,18 @@ def tmp_queue(tmp_path):
 
 class TestMonitorAgentDescribe:
     def test_describe_returns_string(self):
-        agent = MonitorAgent(client=MagicMock())
+        agent = MonitorAgent(backend=MagicMock())
         assert isinstance(agent.describe(), str)
 
     def test_name(self):
-        agent = MonitorAgent(client=MagicMock())
+        agent = MonitorAgent(backend=MagicMock())
         assert agent.name == "monitor_agent"
 
 
 class TestMonitorAgentDemoMode:
     def test_loads_scenarios(self, scenarios_dir, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=True,
             task_queue=tmp_queue,
             scenarios_dir=str(scenarios_dir),
@@ -81,7 +81,7 @@ class TestMonitorAgentDemoMode:
 
     def test_returns_failure_models(self, scenarios_dir, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=True,
             task_queue=tmp_queue,
             scenarios_dir=str(scenarios_dir),
@@ -91,7 +91,7 @@ class TestMonitorAgentDemoMode:
 
     def test_enqueues_tasks(self, scenarios_dir, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=True,
             task_queue=tmp_queue,
             scenarios_dir=str(scenarios_dir),
@@ -102,7 +102,7 @@ class TestMonitorAgentDemoMode:
 
     def test_status_complete_after_run(self, scenarios_dir, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=True,
             task_queue=tmp_queue,
             scenarios_dir=str(scenarios_dir),
@@ -114,7 +114,7 @@ class TestMonitorAgentDemoMode:
         """Malformed scenario files should be skipped with a warning."""
         (tmp_path / "bad.json").write_text("not json {{{")
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=True,
             task_queue=tmp_queue,
             scenarios_dir=str(tmp_path),
@@ -124,7 +124,7 @@ class TestMonitorAgentDemoMode:
 
     def test_empty_scenarios_dir(self, tmp_path, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=True,
             task_queue=tmp_queue,
             scenarios_dir=str(tmp_path),
@@ -137,7 +137,7 @@ class TestMonitorAgentDemoMode:
 class TestMonitorAgentLiveMode:
     def test_raises_without_repo(self, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=False,
             task_queue=tmp_queue,
         )
@@ -146,7 +146,7 @@ class TestMonitorAgentLiveMode:
 
     def test_raises_without_token(self, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=False,
             repo="org/repo",
             github_token="",
@@ -157,7 +157,7 @@ class TestMonitorAgentLiveMode:
 
     def test_status_failed_on_error(self, tmp_queue):
         agent = MonitorAgent(
-            client=MagicMock(),
+            backend=MagicMock(),
             demo_mode=False,
             task_queue=tmp_queue,
         )

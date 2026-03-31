@@ -88,7 +88,7 @@ class PipelineConfig(BaseModel):
         return self
 
 
-_KNOWN_LLM_PROVIDERS = {"anthropic", "bedrock"}
+_KNOWN_LLM_PROVIDERS = {"anthropic", "bedrock", "vertex_ai"}
 
 
 class OpsPilotConfig(BaseModel):
@@ -112,6 +112,16 @@ class OpsPilotConfig(BaseModel):
     aws_region: str = Field(
         default="",
         description="AWS region for Bedrock, e.g. 'us-east-1'. Falls back to AWS_DEFAULT_REGION.",
+    )
+
+    # Google Cloud Vertex AI
+    gcp_project: str = Field(
+        default="",
+        description="GCP project ID for Vertex AI, e.g. 'my-project-123'.",
+    )
+    gcp_region: str = Field(
+        default="",
+        description="GCP region for Vertex AI, e.g. 'us-east5'. Defaults to 'us-east5'.",
     )
 
     @field_validator("llm_provider")
@@ -166,6 +176,10 @@ class OpsPilotConfig(BaseModel):
     def has_bedrock(self) -> bool:
         return self.llm_provider == "bedrock"
 
+    @property
+    def has_vertex(self) -> bool:
+        return self.llm_provider == "vertex_ai"
+
 
 def _substitute_env(value: object) -> object:
     """Recursively substitute ${VAR} references with environment variable values."""
@@ -205,6 +219,8 @@ def load_config(path: Optional[str] = None) -> OpsPilotConfig:
         "anthropic_api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
         "llm_provider":      os.environ.get("LLM_PROVIDER", ""),
         "aws_region":        os.environ.get("AWS_REGION", "") or os.environ.get("AWS_DEFAULT_REGION", ""),
+        "gcp_project":       os.environ.get("GCP_PROJECT", ""),
+        "gcp_region":        os.environ.get("GCP_REGION", ""),
         "github_token":      os.environ.get("GITHUB_TOKEN", ""),
         "gitlab_token":      os.environ.get("GITLAB_TOKEN", ""),
         "jenkins_user":      os.environ.get("JENKINS_USER", ""),

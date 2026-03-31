@@ -91,10 +91,12 @@ def sample_fix(sample_failure: Failure) -> Fix:
 
 
 @pytest.fixture
-def mock_anthropic_client() -> MagicMock:
-    """A mock Anthropic client that returns canned responses."""
-    client = MagicMock()
-    response = MagicMock()
-    response.content = [MagicMock(text='{"output": "test", "severity": "high", "affected_service": "auth", "regression_introduced_in": "a3f21b7", "production_impact": "none", "fix_confidence": "HIGH"}')]
-    client.messages.create.return_value = response
-    return client
+def mock_backend() -> MagicMock:
+    """A mock LLMBackend whose complete() returns a canned JSON string."""
+    backend = MagicMock()
+    backend.complete.return_value = (
+        '{"output": "test", "severity": "high", "affected_service": "auth",'
+        ' "regression_introduced_in": "a3f21b7", "production_impact": "none",'
+        ' "fix_confidence": "HIGH"}'
+    )
+    return backend

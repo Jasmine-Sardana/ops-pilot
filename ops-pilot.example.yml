@@ -9,9 +9,16 @@ model: claude-sonnet-4-6                        # model ID for direct API
 
 # Option B — AWS Bedrock
 # llm_provider: bedrock
-# aws_region: us-east-1                         # falls back to AWS_DEFAULT_REGION
-# model: anthropic.claude-sonnet-4-5-20251001-v1:0  # Bedrock model ID
-# AWS credentials are resolved by boto3: env vars, ~/.aws/credentials, or IAM role
+# aws_region: us-east-1                              # falls back to AWS_DEFAULT_REGION
+# model: anthropic.claude-sonnet-4-5-20251001-v1:0   # Bedrock model ID
+# AWS credentials resolved by boto3: env vars, ~/.aws/credentials, or IAM role
+
+# Option C — Google Cloud Vertex AI
+# llm_provider: vertex_ai
+# gcp_project: my-project-123                        # GCP project ID
+# gcp_region: us-east5                               # Vertex AI region (default: us-east5)
+# model: claude-sonnet-4-5-20251001                  # Vertex model ID (no anthropic. prefix)
+# GCP credentials resolved by ADC: GOOGLE_APPLICATION_CREDENTIALS, gcloud auth, or GCE role
 
 # ── Credentials ───────────────────────────────────────────────────────────────
 github_token: ${GITHUB_TOKEN}                  # classic PAT with repo + workflow scopes

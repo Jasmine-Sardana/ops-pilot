@@ -14,10 +14,9 @@ from __future__ import annotations
 import abc
 import logging
 import os
-from typing import Generic, Optional, TypeVar, Union
+from typing import Generic, Optional, TypeVar
 
-import anthropic
-
+from shared.llm_backend import AnthropicBackend, LLMBackend
 from shared.models import AgentStatus
 
 logger = logging.getLogger(__name__)
@@ -25,38 +24,35 @@ logger = logging.getLogger(__name__)
 # TypeVar for the structured output model each concrete agent returns
 OutputT = TypeVar("OutputT")
 
-# Either a direct API client or an AWS Bedrock client — both expose the same
-# messages.create() interface so agents work without any conditional logic.
-LLMClient = Union[anthropic.Anthropic, anthropic.AnthropicBedrock]
-
 
 class BaseAgent(abc.ABC, Generic[OutputT]):
     """Abstract base for all ops-pilot agents.
 
     Args:
-        client: An ``anthropic.Anthropic`` or ``anthropic.AnthropicBedrock``
-                client instance. If not provided, an ``anthropic.Anthropic``
-                client is created from ``ANTHROPIC_API_KEY`` in the environment.
-                Use ``shared.llm_client.make_client(cfg)`` to get the right
-                client type based on your config.
-        model:  Model ID to use. For Bedrock, use the full model ID such as
-                ``anthropic.claude-sonnet-4-5-20251001-v1:0``. Defaults to
-                ``claude-sonnet-4-6`` (direct API).
+        backend: An ``LLMBackend`` instance. If not provided, an
+                 ``AnthropicBackend`` is created from ``ANTHROPIC_API_KEY``
+                 in the environment. Use ``shared.llm_backend.make_backend(cfg)``
+                 to select the right backend (Anthropic, Bedrock, Vertex AI)
+                 based on your config.
+        model:   Model ID to use. Format varies per backend:
+                 - Anthropic direct: ``claude-sonnet-4-6``
+                 - Bedrock: ``anthropic.claude-sonnet-4-5-20251001-v1:0``
+                 - Vertex AI: ``claude-sonnet-4-5-20251001``
     """
 
     DEFAULT_MODEL = "claude-sonnet-4-6"
 
     def __init__(
         self,
-        client: Optional[LLMClient] = None,
+        backend: Optional[LLMBackend] = None,
         model: Optional[str] = None,
     ) -> None:
-        """Initialize the agent with an injected or auto-created LLM client.
+        """Initialize the agent with an injected or auto-created LLM backend.
 
         No business logic here — only dependency wiring.
         """
-        self.client: LLMClient = client or anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY", "") or None
+        self.backend: LLMBackend = backend or AnthropicBackend(
+            api_key=os.environ.get("ANTHROPIC_API_KEY", "")
         )
         self.model = model or self.DEFAULT_MODEL
         self._status: AgentStatus = AgentStatus.PENDING
@@ -92,22 +88,24 @@ class BaseAgent(abc.ABC, Generic[OutputT]):
     def _call_llm(self, system: str, user: str, max_tokens: int = 2048) -> str:
         """Make a single-turn LLM call and return the text response.
 
+        Delegates to ``self.backend.complete()`` — the backend handles all
+        cloud-provider-specific details (auth, SDK, model ID format).
+
         Args:
             system:     System prompt describing the agent's role.
             user:       User message containing the task details.
             max_tokens: Maximum tokens in the response.
 
         Returns:
-            The text content of the model's first response block.
+            The model's text response.
         """
-        logger.debug("%s: calling %s", self.name, self.model)
-        response = self.client.messages.create(
+        logger.debug("%s: calling %s via %s", self.name, self.model, type(self.backend).__name__)
+        return self.backend.complete(
+            system=system,
+            user=user,
             model=self.model,
             max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": user}],
         )
-        return response.content[0].text
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(model={self.model!r}, status={self._status.value!r})"

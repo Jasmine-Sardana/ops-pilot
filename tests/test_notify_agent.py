@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,27 +12,27 @@ from shared.models import AgentStatus, Failure, Severity
 
 class TestNotifyAgentDescribe:
     def test_describe_returns_string(self):
-        agent = NotifyAgent(client=MagicMock())
+        agent = NotifyAgent(backend=MagicMock())
         assert isinstance(agent.describe(), str)
 
     def test_name(self):
-        agent = NotifyAgent(client=MagicMock())
+        agent = NotifyAgent(backend=MagicMock())
         assert agent.name == "notify_agent"
 
 
 class TestNotifyAgentRun:
-    def _make_agent(self, mock_client, message="Team notified!"):
-        mock_client.messages.create.return_value.content[0].text = message
-        return NotifyAgent(client=mock_client, demo_mode=True)
+    def _make_agent(self, mock_backend, message="Team notified!"):
+        mock_backend.complete.return_value = message
+        return NotifyAgent(backend=mock_backend, demo_mode=True)
 
     def test_run_returns_alert_model(
         self,
         sample_failure: Failure,
         sample_triage,
         sample_fix,
-        mock_anthropic_client,
+        mock_backend,
     ):
-        agent = self._make_agent(mock_anthropic_client, ":red_circle: alert message")
+        agent = self._make_agent(mock_backend, ":red_circle: alert message")
         alert = agent.run(sample_failure, sample_triage, sample_fix)
 
         assert alert.failure_id == sample_failure.id
@@ -44,9 +43,9 @@ class TestNotifyAgentRun:
         sample_failure,
         sample_triage,
         sample_fix,
-        mock_anthropic_client,
+        mock_backend,
     ):
-        agent = self._make_agent(mock_anthropic_client)
+        agent = self._make_agent(mock_backend)
         agent.run(sample_failure, sample_triage, sample_fix)
         assert agent.status == AgentStatus.COMPLETE
 
@@ -55,10 +54,10 @@ class TestNotifyAgentRun:
         sample_failure,
         sample_triage,
         sample_fix,
-        mock_anthropic_client,
+        mock_backend,
     ):
-        mock_anthropic_client.messages.create.side_effect = Exception("LLM error")
-        agent = NotifyAgent(client=mock_anthropic_client, demo_mode=True)
+        mock_backend.complete.side_effect = Exception("LLM error")
+        agent = NotifyAgent(backend=mock_backend, demo_mode=True)
 
         with pytest.raises(Exception, match="LLM error"):
             agent.run(sample_failure, sample_triage, sample_fix)
@@ -70,9 +69,9 @@ class TestNotifyAgentRun:
         sample_failure,
         sample_triage,
         sample_fix,
-        mock_anthropic_client,
+        mock_backend,
     ):
-        agent = self._make_agent(mock_anthropic_client)
+        agent = self._make_agent(mock_backend)
         alert = agent.run(sample_failure, sample_triage, sample_fix)
         assert "console" in alert.output.lower() or "demo" in alert.output.lower()
 
@@ -81,11 +80,11 @@ class TestNotifyAgentRun:
         sample_failure,
         sample_triage,
         sample_fix,
-        mock_anthropic_client,
+        mock_backend,
     ):
-        mock_anthropic_client.messages.create.return_value.content[0].text = "msg"
+        mock_backend.complete.return_value = "msg"
         agent = NotifyAgent(
-            client=mock_anthropic_client,
+            backend=mock_backend,
             demo_mode=True,
             channel="#my-channel",
         )
