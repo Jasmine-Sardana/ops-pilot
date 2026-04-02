@@ -21,7 +21,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
@@ -98,8 +98,8 @@ class ToolContext:
     easy to test in isolation (mock the context), and adding a new runtime
     dependency means adding a field here, not modifying every tool class.
     """
-    provider: "CIProvider | None"
-    failure: "Failure"
+    provider: CIProvider | None
+    failure: Failure
     tenant_id: str = ""
 
 
@@ -432,7 +432,7 @@ class AgentLoop(Generic[T]):
                     "content": result.content,
                     **({"is_error": True} if result.is_error else {}),
                 }
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 failed_tools.append(block.name)
                 logger.warning("Tool '%s' timed out after %.1fs", block.name, self._tool_timeout)
                 return {

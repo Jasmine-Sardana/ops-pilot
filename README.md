@@ -99,7 +99,7 @@ flowchart LR
 | Step | Agent | What it does |
 |------|-------|-------------|
 | 1 | **Monitor** | Polls GitHub Actions / GitLab CI / Jenkins every 30s. Finds new failed runs, fetches log output. |
-| 2 | **Triage** | Sends logs + diff to Claude. Gets back: root cause, severity (LOW→CRITICAL), affected service, fix confidence. |
+| 2 | **Triage** | Runs an agentic tool-use loop: reads source files, fetches earlier log sections, diffs commits — until it has enough signal to conclude. Returns root cause, severity (LOW→CRITICAL), affected service, and fix confidence. If confidence is LOW at turn limit, escalates to human instead of guessing. |
 | 3 | **Fix** | Asks Claude which files to change and how. Commits the patch to `ops-pilot/fix-<sha>`, opens a **draft** PR. Nothing merges without a human. |
 | 4 | **Notify** | Posts a one-paragraph Slack summary: what broke, why, and a link to the PR. Falls back to console output in dev mode. |
 
@@ -114,9 +114,11 @@ ops-pilot/
 ├── agents/
 │   ├── base_agent.py        ← Abstract base: run(), describe(), injected LLM backend
 │   ├── monitor_agent.py     ← Polls CI provider; returns Failure models
-│   ├── triage_agent.py      ← LLM root cause analysis; returns Triage model
+│   ├── triage_agent.py      ← Agentic triage loop; returns Triage model
 │   ├── fix_agent.py         ← LLM patch generation + PR via CI provider
-│   └── notify_agent.py      ← Slack / webhook / console notification
+│   ├── notify_agent.py      ← Slack / webhook / console notification
+│   └── tools/
+│       └── triage_tools.py  ← GetFileTool, GetMoreLogTool, GetCommitDiffTool
 ├── providers/
 │   ├── base.py              ← CIProvider ABC (7 methods: get_failures, open_draft_pr, …)
 │   ├── github.py            ← GitHub Actions implementation
@@ -125,6 +127,7 @@ ops-pilot/
 │   └── factory.py           ← make_provider(pipeline, cfg) — wires config to provider
 ├── shared/
 │   ├── models.py            ← Pydantic models: Failure → Triage → Fix → Alert
+│   ├── agent_loop.py        ← Generic AgentLoop[T]: tool-use loop + Tool ABC + ToolContext
 │   ├── config.py            ← YAML config + env-var substitution + validation
 │   ├── llm_backend.py       ← LLMBackend Protocol + Anthropic / Bedrock / Vertex backends
 │   ├── task_queue.py        ← File-locked task queue (atomic rename, no broker needed)
@@ -218,6 +221,12 @@ The task queue uses `os.rename()` for atomic task claiming — a POSIX guarantee
 
 Live agentic demos are brittle: API rate limits, flaky network, non-deterministic LLM output. Pre-recorded scenarios replay realistic runs with SSE streaming — the demo always works, loads instantly, and costs nothing to host on GitHub Pages.
 
+### Why a tool-use loop in Triage instead of a single prompt?
+
+The original TriageAgent sent one prompt and hoped the answer was in the last 50 log lines. Real failures often aren't: the root cause is 100 lines above the tail, in the source file at the failing line, or in the actual diff hunks (not a summary of which files changed).
+
+`AgentLoop` lets the model request exactly what it needs — `get_file`, `get_more_log`, `get_commit_diff` — and stop when it has enough signal. If it hits the turn limit before concluding, it escalates with partial findings rather than opening a PR based on a guess. A wrong fix is more expensive than a missed fix: it creates a PR engineers have to triage, and it erodes trust in the system.
+
 ### Why draft PRs, not auto-merge?
 
 ops-pilot is a force multiplier, not a replacement for engineering judgment. It opens the PR, writes the description, and notifies the team. A human reviews the diff and merges. This keeps the system useful without making it dangerous.
@@ -233,7 +242,7 @@ Raw dicts break silently when a key is missing. Pydantic validates at constructi
 No local Python install required — runs inside Docker:
 
 ```bash
-docker compose run --rm test                  # 96 tests, 81% coverage
+docker compose run --rm test                  # 115 tests
 docker compose run --rm test pytest -k triage # single agent
 docker compose run --rm test ruff check agents/ shared/
 ```

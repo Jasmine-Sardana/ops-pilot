@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import json
 import types
-from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
 
 from agents.triage_agent import TriageAgent
 from shared.models import AgentStatus, Failure, Severity
-
 
 # ── Mock backend helpers ───────────────────────────────────────────────────────
 

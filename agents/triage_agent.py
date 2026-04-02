@@ -85,7 +85,7 @@ class TriageAgent(BaseAgent[Triage]):
         self,
         backend=None,
         model: str | None = None,
-        provider: "CIProvider | None" = None,
+        provider: CIProvider | None = None,
         max_turns: int = 10,
     ) -> None:
         super().__init__(backend=backend, model=model)

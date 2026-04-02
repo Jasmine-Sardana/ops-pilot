@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import types
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import BaseModel
@@ -29,13 +29,11 @@ from pydantic import BaseModel
 from shared.agent_loop import (
     AgentLoop,
     LoopOutcome,
-    Permission,
     Tool,
     ToolContext,
     ToolResult,
 )
-from shared.models import Failure, FailureDetail, DiffSummary, PipelineInfo
-
+from shared.models import DiffSummary, Failure, FailureDetail, PipelineInfo
 
 # ── Minimal Pydantic model used as response_model in tests ────────────────────
 # Using a simple two-field model keeps tests focused on loop behaviour,

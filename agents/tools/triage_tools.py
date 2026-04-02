@@ -15,7 +15,7 @@ for the model, not for engineers.
 
 from __future__ import annotations
 
-from shared.agent_loop import Permission, Tool, ToolContext, ToolResult
+from shared.agent_loop import Tool, ToolContext, ToolResult
 
 
 class GetFileTool(Tool):
