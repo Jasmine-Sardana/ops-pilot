@@ -107,6 +107,28 @@ class Alert(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class MemoryRecord(BaseModel):
+    """A persisted incident record used for similarity retrieval.
+
+    Stored as memory/incidents/<incident_id>.json. Indexed in
+    memory/index.json for scoring without loading all incident files.
+    """
+
+    incident_id: str
+    repo: str
+    failure_type: str = Field(..., description='"{job} / {step}" from the CI failure')
+    affected_service: str
+    root_cause: str = Field(..., description="Narrative root cause from Triage.output")
+    root_cause_tokens: list[str] = Field(
+        ..., description="Precomputed tokens for Jaccard similarity — do not edit manually"
+    )
+    severity: str
+    fix_pattern: str | None = Field(
+        None, description="Durable fix pattern populated by the consolidation job"
+    )
+    timestamp: datetime
+
+
 class AgentStep(BaseModel):
     """A single agent's recorded output — used in scenario files and streaming."""
 

@@ -35,6 +35,7 @@ from agents.fix_agent import FixAgent
 from agents.investigation_router import InvestigationRouter
 from agents.notify_agent import NotifyAgent
 from agents.triage_agent import TriageAgent
+from shared.memory_store import MemoryStore, make_memory_record
 
 logger = logging.getLogger("ops-pilot")
 
@@ -72,6 +73,7 @@ def run_pipeline(
     cfg: OpsPilotConfig,
     backend: LLMBackend,
     dry_run: bool = False,
+    memory_store: MemoryStore | None = None,
 ) -> None:
     """Run Triage → Fix → Notify for a single failure."""
     from providers.base import CIProvider
@@ -96,12 +98,23 @@ def run_pipeline(
 
     if route == "deep":
         triage = CoordinatorAgent(
-            backend=backend, model=cfg.model, provider=provider_for_triage
+            backend=backend,
+            model=cfg.model,
+            provider=provider_for_triage,
+            memory_store=memory_store,
         ).run(failure)
     else:
         triage = TriageAgent(
             backend=backend, model=cfg.model, provider=provider_for_triage
         ).run(failure)
+
+    # Persist incident to memory store for future similarity retrieval
+    if memory_store is not None:
+        try:
+            memory_store.append(make_memory_record(failure, triage))
+            logger.debug("Memory: saved incident %s", failure.id)
+        except Exception as exc:
+            logger.warning("Memory: failed to save incident %s: %s", failure.id, exc)
 
     sev_color = SEVERITY_COLOR.get(triage.severity, "")
     step("triage", f"Severity: {sev_color}{BOLD}{triage.severity.value.upper()}{RESET}  "
@@ -172,6 +185,7 @@ def _below_threshold(severity: Severity, threshold: Severity) -> bool:
 def watch(cfg: OpsPilotConfig, once: bool = False, dry_run: bool = False) -> None:
     store = StateStore(cfg.state_file)
     backend = make_backend(cfg)
+    memory_store = MemoryStore()
 
     print(f"\n{BOLD}ops-pilot{RESET}  —  monitoring {len(cfg.pipelines)} pipeline(s)")
     for p in cfg.pipelines:
@@ -218,7 +232,7 @@ def watch(cfg: OpsPilotConfig, once: bool = False, dry_run: bool = False) -> Non
 
                 print(f"{YELLOW}▶ Failure:{RESET} {repo}  [{pipeline.provider}]  commit {commit_sha}  run {run_id}")
                 try:
-                    run_pipeline(failure, pipeline, cfg, backend=backend, dry_run=dry_run)
+                    run_pipeline(failure, pipeline, cfg, backend=backend, dry_run=dry_run, memory_store=memory_store)
                     store.set("runs", processed_key, {
                         "repo": repo,
                         "provider": pipeline.provider,

@@ -130,9 +130,10 @@ ops-pilot/
 │   ├── jenkins.py           ← Jenkins implementation (delegates git ops to GitHub/GitLab)
 │   └── factory.py           ← make_provider(pipeline, cfg) — wires config to provider
 ├── shared/
-│   ├── models.py            ← Pydantic models: Failure → Triage → Fix → Alert
+│   ├── models.py            ← Pydantic models: Failure → Triage → Fix → Alert → MemoryRecord
 │   ├── agent_loop.py        ← Generic AgentLoop[T]: tool-use loop + Tool ABC + ToolContext + confirm hook
 │   ├── tool_registry.py     ← ToolRegistry: permission-tier watermark (READ_ONLY ≤ WRITE ≤ DANGEROUS)
+│   ├── memory_store.py      ← MemoryStore: append + weighted similarity retrieval (no external deps)
 │   ├── config.py            ← YAML config + env-var substitution + validation
 │   ├── llm_backend.py       ← LLMBackend Protocol + Anthropic / Bedrock / Vertex backends
 │   ├── task_queue.py        ← File-locked task queue (atomic rename, no broker needed)
@@ -148,6 +149,9 @@ ops-pilot/
 ├── tests/
 │   ├── conftest.py          ← Shared fixtures (sample_failure, mock_backend, …)
 │   ├── test_triage_agent.py
+│   ├── test_coordinator_agent.py
+│   ├── test_investigation_router.py
+│   ├── test_memory_store.py
 │   ├── test_fix_agent.py
 │   ├── test_notify_agent.py
 │   ├── test_monitor_agent.py
@@ -156,8 +160,12 @@ ops-pilot/
 │   ├── test_task_queue.py
 │   └── fixtures/            ← Sample CI log files
 ├── .claude/commands/        ← 5 Claude Code slash commands (see below)
+├── memory/                  ← Incident memory (created at runtime)
+│   ├── incidents/           ← One JSON file per incident
+│   └── index.json           ← Scoring metadata for similarity retrieval
 ├── scripts/
-│   └── watch_and_fix.py     ← Production entry point (continuous watcher)
+│   ├── watch_and_fix.py     ← Production entry point (continuous watcher)
+│   └── consolidate_memory.py ← Weekly job: extract durable fix patterns from incident groups
 ├── run_pipeline.py          ← One-shot live runner for manual testing
 ├── ops-pilot.example.yml    ← Fully documented config template
 ├── Dockerfile
@@ -250,6 +258,30 @@ Workers cannot spawn further workers — no `SpawnWorkerTool` in their tool list
 
 `ToolRegistry.get_tools(max_permission=READ_ONLY)` makes the blast-radius ceiling structural — TriageAgent declares its ceiling at construction time and the registry enforces it. Adding a new write tool to the catalog doesn't automatically make it available to triage; the agent has to explicitly raise its ceiling. `REQUIRES_CONFIRMATION` tools are excluded from all watermark queries and additionally gated at execution time by a `confirm` hook — no hook wired means the tool is always denied (fail-safe, not fail-open).
 
+### Why structured weighted similarity instead of embeddings?
+
+Embedding-based similarity requires either an external API (Anthropic has no embeddings endpoint) or a heavy dependency like `sentence-transformers` (adds PyTorch to the image). Both break the "zero broker" story.
+
+The alternative — structured weighted similarity over typed Triage fields — is actually better for this domain:
+
+```
+score = (
+    1.0 × exact_match(failure_type)     # "pytest / test-auth" is high-signal
+    + 0.6 × exact_match(affected_service) # same service = same codebase area
+    + 0.4 × token_jaccard(root_cause)    # similar error vocabulary
+) / 2.0   → normalized [0, 1]
+```
+
+When a customer asks "why did it pull that old incident?", you can point at the weights rather than explaining a vector space. Root cause tokens are precomputed at write time — query-time is a tight loop with no LLM calls, no IDF corpus, no external deps.
+
+The tradeoff: no semantic similarity ("OOM killed" vs "heap exhaustion"). At ops-pilot scale — hundreds of incidents, constrained vocabulary — token overlap performs close to embeddings in practice.
+
+### Why does memory retrieval live in CoordinatorAgent, not InvestigationRouter?
+
+Memory retrieval before a fast-path triage would be wasted: simple failures don't need historical context. Deep investigations do.
+
+The coordinator already decides what workers to spawn and what brief to give them. Retrieving prior incidents before spawning lets that context flow into both the spawning decision and the task brief passed to each worker. The retrieval is also visible in the coordinator's initial message — auditable in Phase 7's structured log, not hidden in a system prompt.
+
 ### Why draft PRs, not auto-merge?
 
 ops-pilot is a force multiplier, not a replacement for engineering judgment. It opens the PR, writes the description, and notifies the team. A human reviews the diff and merges. This keeps the system useful without making it dangerous.
@@ -265,7 +297,7 @@ Raw dicts break silently when a key is missing. Pydantic validates at constructi
 No local Python install required — runs inside Docker:
 
 ```bash
-docker compose run --rm test                  # 186 tests
+docker compose run --rm test                  # 226 tests
 docker compose run --rm test pytest -k triage # single agent
 docker compose run --rm test ruff check agents/ shared/
 ```
