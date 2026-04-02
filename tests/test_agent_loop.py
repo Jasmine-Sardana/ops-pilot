@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from shared.agent_loop import (
     AgentLoop,
     LoopOutcome,
+    Permission,
     Tool,
     ToolContext,
     ToolResult,
@@ -629,3 +630,138 @@ class TestToolExecution:
         second_call_messages = backend.complete_with_tools.call_args_list[1][1]["messages"]
         tool_result = second_call_messages[2]["content"][0]
         assert tool_result.get("is_error") is True
+
+
+# ── Tests: confirmation hook ───────────────────────────────────────────────────
+
+class ConfirmationTool(Tool):
+    """A tool that requires confirmation before it executes."""
+
+    def __init__(self) -> None:
+        self.executed = False
+
+    @property
+    def name(self) -> str:
+        return "confirm_action"
+
+    @property
+    def description(self) -> str:
+        return "A tool that requires confirmation"
+
+    @property
+    def input_schema(self) -> dict:
+        return {"type": "object", "properties": {}}
+
+    @property
+    def permission(self) -> Permission:
+        return Permission.REQUIRES_CONFIRMATION
+
+    async def execute(self, input: dict, ctx: ToolContext) -> ToolResult:
+        self.executed = True
+        return ToolResult("action executed")
+
+
+class TestConfirmHook:
+    async def test_requires_confirmation_blocked_when_no_hook(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """REQUIRES_CONFIRMATION tool is blocked by default (confirm=None → deny)."""
+        tool = ConfirmationTool()
+        backend = _make_backend([
+            _response(_tool_block("confirm_action", {}, "t1")),
+            _end_turn(),
+        ])
+        # No confirm hook — fail-safe
+        loop = _make_loop(tools=[tool], backend=backend)
+        result = await loop.run(
+            messages=[{"role": "user", "content": "go"}],
+            ctx=tool_ctx,
+        )
+
+        # Tool must NOT have executed
+        assert not tool.executed
+        # Must still produce an error tool_result (never skip the pair)
+        assert "confirm_action" in result.failed_tools
+        second_call_messages = backend.complete_with_tools.call_args_list[1][1]["messages"]
+        tool_result = second_call_messages[2]["content"][0]
+        assert tool_result.get("is_error") is True
+        assert "confirmation" in tool_result["content"].lower()
+
+    async def test_requires_confirmation_executes_when_hook_approves(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """REQUIRES_CONFIRMATION tool runs when confirm hook returns True."""
+        tool = ConfirmationTool()
+        backend = _make_backend([
+            _response(_tool_block("confirm_action", {}, "t1")),
+            _end_turn(),
+        ])
+
+        async def auto_approve(t: Tool, inp: dict) -> bool:
+            return True
+
+        loop = AgentLoop(
+            tools=[tool],
+            backend=backend,
+            domain_system_prompt="test",
+            response_model=Finding,
+            model="claude-sonnet-4-6",
+            max_turns=5,
+            confirm=auto_approve,
+        )
+        result = await loop.run(
+            messages=[{"role": "user", "content": "go"}],
+            ctx=tool_ctx,
+        )
+
+        assert tool.executed
+        assert "confirm_action" not in result.failed_tools
+
+    async def test_requires_confirmation_blocked_when_hook_denies(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """REQUIRES_CONFIRMATION tool is blocked when confirm hook returns False."""
+        tool = ConfirmationTool()
+        backend = _make_backend([
+            _response(_tool_block("confirm_action", {}, "t1")),
+            _end_turn(),
+        ])
+
+        async def auto_deny(t: Tool, inp: dict) -> bool:
+            return False
+
+        loop = AgentLoop(
+            tools=[tool],
+            backend=backend,
+            domain_system_prompt="test",
+            response_model=Finding,
+            model="claude-sonnet-4-6",
+            max_turns=5,
+            confirm=auto_deny,
+        )
+        result = await loop.run(
+            messages=[{"role": "user", "content": "go"}],
+            ctx=tool_ctx,
+        )
+
+        assert not tool.executed
+        assert "confirm_action" in result.failed_tools
+
+    async def test_read_only_tool_not_gated_by_confirm(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """READ_ONLY tools execute without needing a confirm hook."""
+        tool = RecordingTool("safe_tool")
+        backend = _make_backend([
+            _response(_tool_block("safe_tool", {}, "t1")),
+            _end_turn(),
+        ])
+        # No confirm hook — should not affect read-only tools
+        loop = _make_loop(tools=[tool], backend=backend)
+        result = await loop.run(
+            messages=[{"role": "user", "content": "go"}],
+            ctx=tool_ctx,
+        )
+
+        assert len(tool.calls) == 1
+        assert "safe_tool" not in result.failed_tools

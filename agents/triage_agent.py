@@ -29,8 +29,9 @@ from typing import TYPE_CHECKING
 
 from agents.base_agent import BaseAgent
 from agents.tools.triage_tools import GetCommitDiffTool, GetFileTool, GetMoreLogTool
-from shared.agent_loop import AgentLoop, LoopOutcome, LoopResult, ToolContext
+from shared.agent_loop import AgentLoop, LoopOutcome, LoopResult, Permission, ToolContext
 from shared.models import AgentStatus, Failure, Severity, Triage
+from shared.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
     from providers.base import CIProvider
@@ -87,10 +88,17 @@ class TriageAgent(BaseAgent[Triage]):
         model: str | None = None,
         provider: CIProvider | None = None,
         max_turns: int = 10,
+        registry: ToolRegistry | None = None,
     ) -> None:
         super().__init__(backend=backend, model=model)
         self._provider = provider
         self._max_turns = max_turns
+        if registry is None:
+            registry = ToolRegistry()
+            registry.register(GetFileTool())
+            registry.register(GetMoreLogTool())
+            registry.register(GetCommitDiffTool())
+        self._registry = registry
 
     def describe(self) -> str:
         return "Analyses CI logs and diffs to identify root causes via agentic tool use"
@@ -137,7 +145,7 @@ class TriageAgent(BaseAgent[Triage]):
     async def _run_loop(self, failure: Failure) -> LoopResult[Triage]:
         """Build and run the AgentLoop for one failure."""
         loop: AgentLoop[Triage] = AgentLoop(
-            tools=[GetFileTool(), GetMoreLogTool(), GetCommitDiffTool()],
+            tools=self._registry.get_tools(max_permission=Permission.READ_ONLY),
             backend=self.backend,
             domain_system_prompt=SYSTEM_PROMPT,
             response_model=Triage,
