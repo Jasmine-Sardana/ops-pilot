@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -262,8 +263,10 @@ class AgentLoop(Generic[T]):
         max_turns: int = 10,
         tool_timeout: float = 30.0,
         max_tokens: int = 4096,
+        confirm: Callable[[Tool, dict], Awaitable[bool]] | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {t.name: t for t in tools}
+        self._confirm = confirm
         self._backend = backend
         self._response_model = response_model
         self._model = model
@@ -419,6 +422,32 @@ class AgentLoop(Generic[T]):
                     ),
                     "is_error": True,
                 }
+
+            # ── Confirmation gate ────────────────────────────────────────────
+            # REQUIRES_CONFIRMATION tools are blocked unless a confirm hook is
+            # wired and approves. Fail-safe: no hook → denied. The model receives
+            # a clear error message and can adapt (explain what it would do, ask
+            # for escalation, etc.). Never silently skip the tool_result — the
+            # API requires every tool_use to have a paired result.
+            if tool.permission == Permission.REQUIRES_CONFIRMATION:
+                approved = (
+                    self._confirm is not None
+                    and await self._confirm(tool, block.input)
+                )
+                if not approved:
+                    failed_tools.append(block.name)
+                    return {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": (
+                            f"Tool '{block.name}' requires explicit confirmation "
+                            "before execution. No confirmation hook is configured "
+                            "— action blocked. Summarise what you intended to do "
+                            "and why, so a human can review and approve."
+                        ),
+                        "is_error": True,
+                    }
+
             try:
                 result = await asyncio.wait_for(
                     tool.execute(block.input, ctx),
