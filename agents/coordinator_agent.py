@@ -27,7 +27,8 @@ from typing import TYPE_CHECKING
 from agents.base_agent import BaseAgent
 from agents.tools.coordinator_tools import SpawnWorkerTool, build_workers
 from shared.agent_loop import AgentLoop, LoopOutcome, LoopResult, ToolContext
-from shared.models import AgentStatus, Failure, Severity, Triage
+from shared.memory_store import MemoryStore
+from shared.models import AgentStatus, Failure, MemoryRecord, Severity, Triage
 
 if TYPE_CHECKING:
     from providers.base import CIProvider
@@ -89,11 +90,13 @@ class CoordinatorAgent(BaseAgent[Triage]):
         provider: CIProvider | None = None,
         max_turns: int = 4,
         worker_max_turns: int = 5,
+        memory_store: MemoryStore | None = None,
     ) -> None:
         super().__init__(backend=backend, model=model)
         self._provider = provider
         self._max_turns = max_turns
         self._worker_max_turns = worker_max_turns
+        self._memory_store = memory_store
 
     def describe(self) -> str:
         return (
@@ -142,7 +145,9 @@ class CoordinatorAgent(BaseAgent[Triage]):
             raise
 
     async def _run_coordinator(self, failure: Failure) -> LoopResult[Triage]:
-        """Build workers and run the coordinator loop."""
+        """Build workers, retrieve memory context, and run the coordinator loop."""
+        prior_incidents = self._retrieve_prior_incidents(failure)
+
         workers = build_workers(self.backend, self.model, self._worker_max_turns)
         spawn_tool = SpawnWorkerTool(workers)
 
@@ -158,36 +163,93 @@ class CoordinatorAgent(BaseAgent[Triage]):
             provider=self._provider,
             failure=failure,
         )
-        messages = [{"role": "user", "content": self._build_initial_message(failure)}]
+        messages = [
+            {"role": "user", "content": self._build_initial_message(failure, prior_incidents)}
+        ]
         return await loop.run(messages=messages, ctx=ctx)
 
+    def _retrieve_prior_incidents(self, failure: Failure) -> list[MemoryRecord]:
+        """Retrieve similar past incidents from memory, if a store is configured.
+
+        Uses the failure's job/step as failure_type, job name as an
+        affected_service proxy (actual service is only known after triage),
+        and the last 5 log lines + diff key_change as the root_cause query.
+        """
+        if self._memory_store is None:
+            return []
+        failure_type = f"{failure.failure.job} / {failure.failure.step}"
+        affected_service_proxy = failure.failure.job
+        root_cause_query = (
+            failure.diff_summary.key_change
+            + " "
+            + " ".join(failure.failure.log_tail[-5:])
+        )
+        prior = self._memory_store.retrieve_similar(
+            failure_type=failure_type,
+            affected_service=affected_service_proxy,
+            root_cause=root_cause_query,
+        )
+        if prior:
+            logger.info(
+                "CoordinatorAgent: retrieved %d similar past incident(s) from memory",
+                len(prior),
+            )
+        return prior
+
     @staticmethod
-    def _build_initial_message(failure: Failure) -> str:
-        """Build the coordinator's initial user message with full failure context."""
+    def _build_initial_message(
+        failure: Failure,
+        prior_incidents: list[MemoryRecord] | None = None,
+    ) -> str:
+        """Build the coordinator's initial user message with full failure context.
+
+        Prior incidents (if any) are injected as structured data — not baked
+        into the system prompt — so they remain visible in the tool call log
+        and auditable in Phase 7.
+        """
         log_tail = "\n".join(failure.failure.log_tail)
         files_changed = ", ".join(failure.diff_summary.files_changed) or "(none listed)"
 
-        return f"""## CI Failure requiring deep investigation
+        lines = [
+            "## CI Failure requiring deep investigation",
+            "",
+            f"**Failure ID:** {failure.id}",
+            f"**Repository:** {failure.pipeline.repo}",
+            f"**Branch:** {failure.pipeline.branch}",
+            f'**Commit:** {failure.pipeline.commit} — "{failure.pipeline.commit_message}"',
+            f"**Author:** {failure.pipeline.author}",
+            f"**Job:** {failure.failure.job} / Step: {failure.failure.step}",
+            f"**Exit code:** {failure.failure.exit_code}",
+            "",
+            "### Log tail (last ~50 lines)",
+            "```",
+            log_tail,
+            "```",
+            "",
+            "### Diff summary",
+            f"Files changed: {files_changed}",
+            f"Lines added: {failure.diff_summary.lines_added}, removed: {failure.diff_summary.lines_removed}",
+            f"Key change: {failure.diff_summary.key_change}",
+        ]
 
-**Failure ID:** {failure.id}
-**Repository:** {failure.pipeline.repo}
-**Branch:** {failure.pipeline.branch}
-**Commit:** {failure.pipeline.commit} — "{failure.pipeline.commit_message}"
-**Author:** {failure.pipeline.author}
-**Job:** {failure.failure.job} / Step: {failure.failure.step}
-**Exit code:** {failure.failure.exit_code}
+        if prior_incidents:
+            lines += [
+                "",
+                "### Similar past incidents (retrieved from memory)",
+                "These are real past incidents that matched this failure pattern. "
+                "Use them as context — they may indicate a recurring root cause or a known fix.",
+            ]
+            for i, inc in enumerate(prior_incidents, 1):
+                lines.append(f"\n**[{i}]** `{inc.failure_type}` in `{inc.repo}` (severity: {inc.severity})")
+                lines.append(f"Root cause: {inc.root_cause}")
+                if inc.fix_pattern:
+                    lines.append(f"Fix pattern: {inc.fix_pattern}")
 
-### Log tail (last ~50 lines)
-```
-{log_tail}
-```
-
-### Diff summary
-Files changed: {files_changed}
-Lines added: {failure.diff_summary.lines_added}, removed: {failure.diff_summary.lines_removed}
-Key change: {failure.diff_summary.key_change}
-
-Spawn all three workers now with concrete tasks based on the above context."""
+        lines += [
+            "",
+            "Spawn all three workers now with concrete tasks based on the above context.",
+        ]
+        return "\n".join(lines)
 
     @staticmethod
     def _loop_result_to_triage(result: LoopResult[Triage], failure: Failure) -> Triage:

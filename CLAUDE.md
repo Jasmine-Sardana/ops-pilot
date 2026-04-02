@@ -57,7 +57,7 @@ Convert hardcoded provider calls into schema-defined tools the model can discove
 
 ---
 
-### Phase 3 — Multi-Agent Orchestration  `[ PENDING ]`
+### Phase 3 — Multi-Agent Orchestration  `[ DONE ]`
 Coordinator agent spawns parallel workers for complex incidents.
 
 **What to build:**
@@ -69,7 +69,7 @@ Coordinator agent spawns parallel workers for complex incidents.
 
 ---
 
-### Phase 4 — Memory System  `[ PENDING ]`
+### Phase 4 — Memory System  `[ DONE ]`
 Accumulate operational knowledge across incidents so the agent improves over time.
 
 **What to build:**
