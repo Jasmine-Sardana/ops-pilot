@@ -35,6 +35,7 @@ from agents.fix_agent import FixAgent
 from agents.investigation_router import InvestigationRouter
 from agents.notify_agent import NotifyAgent
 from agents.triage_agent import TriageAgent
+from shared.context_budget import ContextBudget
 from shared.memory_store import MemoryStore, make_memory_record
 
 logger = logging.getLogger("ops-pilot")
@@ -67,6 +68,11 @@ def step(agent: str, msg: str, color: str = CYAN) -> None:
 
 # ── Pipeline runner ────────────────────────────────────────────────────────────
 
+# Context limit for claude-sonnet-4-6 (200k tokens). ContextBudget compacts
+# history at 75% of this — ~150k tokens — before each model call.
+_MODEL_CONTEXT_TOKENS = 200_000
+
+
 def run_pipeline(
     failure: Failure,
     pipeline: PipelineConfig,
@@ -96,16 +102,22 @@ def run_pipeline(
     except Exception:
         provider_for_triage = None
 
+    context_budget = ContextBudget(max_tokens=_MODEL_CONTEXT_TOKENS)
+
     if route == "deep":
         triage = CoordinatorAgent(
             backend=backend,
             model=cfg.model,
             provider=provider_for_triage,
             memory_store=memory_store,
+            context_budget=context_budget,
         ).run(failure)
     else:
         triage = TriageAgent(
-            backend=backend, model=cfg.model, provider=provider_for_triage
+            backend=backend,
+            model=cfg.model,
+            provider=provider_for_triage,
+            context_budget=context_budget,
         ).run(failure)
 
     # Persist incident to memory store for future similarity retrieval

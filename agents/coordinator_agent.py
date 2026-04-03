@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 from agents.base_agent import BaseAgent
 from agents.tools.coordinator_tools import SpawnWorkerTool, build_workers
 from shared.agent_loop import AgentLoop, LoopOutcome, LoopResult, ToolContext
+from shared.context_budget import ContextBudget
 from shared.memory_store import MemoryStore
 from shared.models import AgentStatus, Failure, MemoryRecord, Severity, Triage
 
@@ -91,12 +92,14 @@ class CoordinatorAgent(BaseAgent[Triage]):
         max_turns: int = 4,
         worker_max_turns: int = 5,
         memory_store: MemoryStore | None = None,
+        context_budget: ContextBudget | None = None,
     ) -> None:
         super().__init__(backend=backend, model=model)
         self._provider = provider
         self._max_turns = max_turns
         self._worker_max_turns = worker_max_turns
         self._memory_store = memory_store
+        self._context_budget = context_budget
 
     def describe(self) -> str:
         return (
@@ -158,6 +161,7 @@ class CoordinatorAgent(BaseAgent[Triage]):
             response_model=Triage,
             model=self.model,
             max_turns=self._max_turns,
+            context_budget=self._context_budget,
         )
         ctx = ToolContext(
             provider=self._provider,

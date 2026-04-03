@@ -81,7 +81,7 @@ Accumulate operational knowledge across incidents so the agent improves over tim
 
 ---
 
-### Phase 5 — Context Management  `[ PENDING ]`
+### Phase 5 — Context Management  `[ DONE ]`
 Token budgeting and compaction for long-running investigations.
 
 **What to build:**

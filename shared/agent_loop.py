@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from providers.base import CIProvider
+    from shared.context_budget import ContextBudget
     from shared.models import Failure
 
 logger = logging.getLogger(__name__)
@@ -264,6 +265,7 @@ class AgentLoop(Generic[T]):
         tool_timeout: float = 30.0,
         max_tokens: int = 4096,
         confirm: Callable[[Tool, dict], Awaitable[bool]] | None = None,
+        context_budget: ContextBudget | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {t.name: t for t in tools}
         self._confirm = confirm
@@ -273,6 +275,7 @@ class AgentLoop(Generic[T]):
         self._max_turns = max_turns
         self._tool_timeout = tool_timeout
         self._max_tokens = max_tokens
+        self._context_budget = context_budget
 
         # Full system prompt = domain instructions + loop mechanics footer.
         # The schema is embedded in the footer so the model knows the shape
@@ -303,6 +306,23 @@ class AgentLoop(Generic[T]):
 
         for turn in range(self._max_turns):
             logger.debug("AgentLoop turn %d/%d", turn + 1, self._max_turns)
+
+            # ── Step 0: Compact history if budget threshold is reached ───────
+            # Runs before the model call so the outgoing request stays within
+            # the context limit. Compaction replaces processed tool_result bodies
+            # with stubs — the model's interpretations in assistant turns are
+            # preserved. The last user message (unprocessed tool results) is
+            # always left intact.
+            if self._context_budget is not None and self._context_budget.should_compact(history):
+                before = self._context_budget._estimate_tokens(history)
+                history = self._context_budget.compact(history)
+                after = self._context_budget._estimate_tokens(history)
+                logger.info(
+                    "AgentLoop: compacted history at turn %d — %d→%d estimated tokens",
+                    turn + 1,
+                    before,
+                    after,
+                )
 
             # ── Step 1: Call the model ───────────────────────────────────────
             # Pass list(history) — a snapshot — not the mutable history reference.
