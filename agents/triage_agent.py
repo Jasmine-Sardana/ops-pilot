@@ -35,6 +35,7 @@ from shared.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
     from providers.base import CIProvider
+    from shared.context_budget import ContextBudget
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +90,12 @@ class TriageAgent(BaseAgent[Triage]):
         provider: CIProvider | None = None,
         max_turns: int = 10,
         registry: ToolRegistry | None = None,
+        context_budget: ContextBudget | None = None,
     ) -> None:
         super().__init__(backend=backend, model=model)
         self._provider = provider
         self._max_turns = max_turns
+        self._context_budget = context_budget
         if registry is None:
             registry = ToolRegistry()
             registry.register(GetFileTool())
@@ -151,6 +154,7 @@ class TriageAgent(BaseAgent[Triage]):
             response_model=Triage,
             model=self.model,
             max_turns=self._max_turns,
+            context_budget=self._context_budget,
         )
         ctx = ToolContext(
             provider=self._provider,

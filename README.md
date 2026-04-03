@@ -133,6 +133,7 @@ ops-pilot/
 │   ├── models.py            ← Pydantic models: Failure → Triage → Fix → Alert → MemoryRecord
 │   ├── agent_loop.py        ← Generic AgentLoop[T]: tool-use loop + Tool ABC + ToolContext + confirm hook
 │   ├── tool_registry.py     ← ToolRegistry: permission-tier watermark (READ_ONLY ≤ WRITE ≤ DANGEROUS)
+│   ├── context_budget.py    ← ContextBudget: token estimation + Strategy A compaction
 │   ├── memory_store.py      ← MemoryStore: append + weighted similarity retrieval (no external deps)
 │   ├── config.py            ← YAML config + env-var substitution + validation
 │   ├── llm_backend.py       ← LLMBackend Protocol + Anthropic / Bedrock / Vertex backends
@@ -282,6 +283,27 @@ Memory retrieval before a fast-path triage would be wasted: simple failures don'
 
 The coordinator already decides what workers to spawn and what brief to give them. Retrieving prior incidents before spawning lets that context flow into both the spawning decision and the task brief passed to each worker. The retrieval is also visible in the coordinator's initial message — auditable in Phase 7's structured log, not hidden in a system prompt.
 
+### Why does `ContextBudget` live outside `AgentLoop`, and why is it opt-in?
+
+`AgentLoop` is a generic execution engine — it shouldn't know what model it's running on or what its context limit is. Those are operational concerns owned by the entry point that constructs the agents. `ContextBudget` is injected at construction time; `AgentLoop` just calls `should_compact` and `compact` without knowing how either works.
+
+`context_budget=None` means "no budgeting" — existing call sites (tests, demo mode) are unchanged. New operational deployments in `watch_and_fix.py` wire in a budget sized for the model in use. The pattern is the same as `memory_store` on `CoordinatorAgent`: capabilities are opt-in, not forced on every caller.
+
+### Why `chars // 4` and not the Anthropic token-counting API?
+
+Token counting is for triggering a compaction decision, not for billing. The heuristic `len(all_chars) // 4` is conservative — it tends to underestimate for code and log content — so triggering at 75% of the limit absorbs the error. The Anthropic counting endpoint adds a network round-trip before every inference call, which is the wrong trade on an already-hot path. More importantly, adding a counting method to `LLMBackend` would force all three backends (Anthropic, Bedrock, Vertex) and all test mocks to implement it — a maintenance tax for an internal loop concern.
+
+### Why Strategy A (replace tool_result bodies) and not full-history summarization?
+
+By the time compaction triggers, the model has already interpreted each tool result in its subsequent assistant turn. The interpretation is load-bearing; the raw source data isn't:
+
+```
+turn N:   tool_result  → [200 lines of raw CI log]
+turn N+1: assistant    → "NPE at TokenService.validate() line 42"
+```
+
+Replacing the raw log with a stub loses nothing the model doesn't already have. Full-history summarization (Strategy B) would cost an extra LLM call on a context-stressed path, and the model summarizing its own reasoning can drop details that become relevant two turns later. Strategy B can slot in later by implementing the same `compact()` interface — the architecture supports it without changing `AgentLoop`.
+
 ### Why draft PRs, not auto-merge?
 
 ops-pilot is a force multiplier, not a replacement for engineering judgment. It opens the PR, writes the description, and notifies the team. A human reviews the diff and merges. This keeps the system useful without making it dangerous.
@@ -297,7 +319,7 @@ Raw dicts break silently when a key is missing. Pydantic validates at constructi
 No local Python install required — runs inside Docker:
 
 ```bash
-docker compose run --rm test                  # 226 tests
+docker compose run --rm test                  # 256 tests
 docker compose run --rm test pytest -k triage # single agent
 docker compose run --rm test ruff check agents/ shared/
 ```
