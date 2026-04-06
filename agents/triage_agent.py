@@ -31,6 +31,7 @@ from agents.base_agent import BaseAgent
 from agents.tools.triage_tools import GetCommitDiffTool, GetFileTool, GetMoreLogTool
 from shared.agent_loop import AgentLoop, LoopOutcome, LoopResult, Permission, ToolContext
 from shared.models import AgentStatus, Failure, Severity, Triage
+from shared.tenant_context import TenantContext
 from shared.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -91,11 +92,13 @@ class TriageAgent(BaseAgent[Triage]):
         max_turns: int = 10,
         registry: ToolRegistry | None = None,
         context_budget: ContextBudget | None = None,
+        tenant_context: TenantContext | None = None,
     ) -> None:
         super().__init__(backend=backend, model=model)
         self._provider = provider
         self._max_turns = max_turns
         self._context_budget = context_budget
+        self._tenant_context = tenant_context
         if registry is None:
             registry = ToolRegistry()
             registry.register(GetFileTool())
@@ -155,10 +158,12 @@ class TriageAgent(BaseAgent[Triage]):
             model=self.model,
             max_turns=self._max_turns,
             context_budget=self._context_budget,
+            tenant_context=self._tenant_context,
         )
         ctx = ToolContext(
             provider=self._provider,
             failure=failure,
+            tenant_id=self._tenant_context.tenant_id if self._tenant_context else "",
         )
         messages = [{"role": "user", "content": self._build_initial_message(failure)}]
         return await loop.run(messages=messages, ctx=ctx)
