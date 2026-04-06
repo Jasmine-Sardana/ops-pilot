@@ -28,9 +28,12 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
+from shared.context_budget import ContextBudget
+from shared.exceptions import RateLimitExceeded
+from shared.tenant_context import TenantContext
+
 if TYPE_CHECKING:
     from providers.base import CIProvider
-    from shared.context_budget import ContextBudget
     from shared.models import Failure
 
 logger = logging.getLogger(__name__)
@@ -266,6 +269,7 @@ class AgentLoop(Generic[T]):
         max_tokens: int = 4096,
         confirm: Callable[[Tool, dict], Awaitable[bool]] | None = None,
         context_budget: ContextBudget | None = None,
+        tenant_context: TenantContext | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {t.name: t for t in tools}
         self._confirm = confirm
@@ -276,6 +280,7 @@ class AgentLoop(Generic[T]):
         self._tool_timeout = tool_timeout
         self._max_tokens = max_tokens
         self._context_budget = context_budget
+        self._tenant_context = tenant_context
 
         # Full system prompt = domain instructions + loop mechanics footer.
         # The schema is embedded in the footer so the model knows the shape
@@ -325,6 +330,27 @@ class AgentLoop(Generic[T]):
                 )
 
             # ── Step 1: Call the model ───────────────────────────────────────
+            # Check rate limit before calling the model.
+            if self._tenant_context is not None:
+                estimated = ContextBudget._estimate_tokens(history)
+                try:
+                    self._tenant_context.rate_limiter.check_and_consume(estimated)
+                except RateLimitExceeded as exc:
+                    logger.warning(
+                        "AgentLoop: rate limit reached for tenant '%s': %s",
+                        self._tenant_context.tenant_id,
+                        exc,
+                    )
+                    extracted = await self._extract_structured(history)
+                    return LoopResult(
+                        outcome=LoopOutcome.TURN_LIMIT,
+                        model_confidence="LOW",
+                        extracted=extracted,
+                        turns_used=turn + 1,
+                        failed_tools=failed_tools,
+                        last_assistant_text=last_text + f" [rate limit reached: {exc}]",
+                    )
+
             # Pass list(history) — a snapshot — not the mutable history reference.
             # If we passed history directly, the mock in tests would record the
             # reference and see future appends in call_args. More importantly,
@@ -338,6 +364,14 @@ class AgentLoop(Generic[T]):
                 max_tokens=self._max_tokens,
             )
             text_blocks, tool_uses = self._parse_response(raw)
+
+            # Record usage after successful LLM call
+            if self._tenant_context is not None:
+                call_tokens = ContextBudget._estimate_tokens(
+                    [{"content": [getattr(b, "text", "") for b in raw.content]}]
+                )
+                self._tenant_context.usage_tracker.record_tokens(call_tokens)
+                self._tenant_context.usage_tracker.record_api_call()
 
             if text_blocks:
                 last_text = " ".join(b.text for b in text_blocks)
@@ -439,6 +473,23 @@ class AgentLoop(Generic[T]):
                     "content": (
                         f"Unknown tool '{block.name}'. "
                         f"Available tools: {sorted(self._tools.keys())}"
+                    ),
+                    "is_error": True,
+                }
+
+            # ── Permission gate ──────────────────────────────────────────────
+            # Block tools not in the deployment's allowlist before execution.
+            if (
+                self._tenant_context is not None
+                and not self._tenant_context.permissions.is_allowed(block.name)
+            ):
+                failed_tools.append(block.name)
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": (
+                        f"Tool '{block.name}' is not permitted for this deployment. "
+                        "Use an alternative tool or conclude without this data."
                     ),
                     "is_error": True,
                 }

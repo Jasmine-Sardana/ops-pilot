@@ -396,3 +396,40 @@ class TestMakeMemoryRecord:
     def test_fix_pattern_defaults_to_none(self) -> None:
         record = make_memory_record(_make_failure(), _make_triage())
         assert record.fix_pattern is None
+
+
+# ── tenant_id support ─────────────────────────────────────────────────────────
+
+class TestTenantId:
+    def test_memory_record_tenant_id_defaults_to_none(self) -> None:
+        """Existing records without tenant_id load without error (backward compat)."""
+        from datetime import datetime
+        record_dict = {
+            "incident_id": "test-001",
+            "repo": "org/repo",
+            "failure_type": "build / test",
+            "affected_service": "auth",
+            "root_cause": "NPE in validate()",
+            "root_cause_tokens": ["npe", "validate"],
+            "severity": "high",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+        record = MemoryRecord.model_validate(record_dict)
+        assert record.tenant_id is None
+
+    def test_make_memory_record_with_tenant_id(self) -> None:
+        record = make_memory_record(_make_failure(), _make_triage(), tenant_id="acme-corp")
+        assert record.tenant_id == "acme-corp"
+
+    def test_make_memory_record_without_tenant_id(self) -> None:
+        record = make_memory_record(_make_failure(), _make_triage())
+        assert record.tenant_id is None
+
+    def test_memory_record_with_tenant_id_round_trips(self, tmp_path) -> None:
+        """tenant_id survives a write-read cycle through MemoryStore."""
+        store = MemoryStore(base_dir=tmp_path)
+        record = make_memory_record(_make_failure(), _make_triage(), tenant_id="acme-corp")
+        store.append(record)
+        retrieved = store._load_record(record.incident_id)
+        assert retrieved is not None
+        assert retrieved.tenant_id == "acme-corp"

@@ -20,6 +20,10 @@ import pytest
 
 from agents.triage_agent import TriageAgent
 from shared.models import AgentStatus, Failure, Severity
+from shared.rate_limiter import RateLimiter
+from shared.tenant_context import TenantContext
+from shared.tool_permissions import ToolPermissions
+from shared.usage_tracker import UsageTracker
 
 # ── Mock backend helpers ───────────────────────────────────────────────────────
 
@@ -151,3 +155,34 @@ class TestBuildInitialMessage:
         msg = TriageAgent._build_initial_message(sample_failure)
         for line in sample_failure.failure.log_tail:
             assert line in msg
+
+
+# ── Tests: TenantContext threading ────────────────────────────────────────────
+
+
+def _make_tenant_ctx() -> TenantContext:
+    return TenantContext(
+        tenant_id="test-tenant",
+        permissions=ToolPermissions(allowed_tools=[]),
+        usage_tracker=MagicMock(spec=UsageTracker),
+        rate_limiter=MagicMock(spec=RateLimiter),
+    )
+
+
+class TestTenantContextThreading:
+    def test_triage_agent_accepts_tenant_context(self) -> None:
+        """TriageAgent constructor accepts tenant_context without error."""
+        ctx = _make_tenant_ctx()
+        agent = TriageAgent(tenant_context=ctx)
+        assert agent._tenant_context is ctx
+
+    def test_triage_agent_default_no_tenant_context(self) -> None:
+        """TriageAgent defaults to no tenant_context (backward compat)."""
+        agent = TriageAgent()
+        assert agent._tenant_context is None
+
+    def test_tenant_id_wired_to_tenant_context(self) -> None:
+        """The tenant_id from TenantContext is accessible on the agent."""
+        ctx = _make_tenant_ctx()
+        agent = TriageAgent(tenant_context=ctx)
+        assert agent._tenant_context.tenant_id == "test-tenant"

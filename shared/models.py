@@ -126,6 +126,10 @@ class MemoryRecord(BaseModel):
     fix_pattern: str | None = Field(
         None, description="Durable fix pattern populated by the consolidation job"
     )
+    tenant_id: str | None = Field(
+        default=None,
+        description="Deployment tenant identifier — None for records from before Phase 6.",
+    )
     timestamp: datetime
 
 

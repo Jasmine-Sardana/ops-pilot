@@ -271,15 +271,21 @@ def _atomic_write(path: Path, content: str) -> None:
 
 # ── Factory helper ────────────────────────────────────────────────────────────
 
-def make_memory_record(failure: Failure, triage: Triage) -> MemoryRecord:
+def make_memory_record(
+    failure: Failure,
+    triage: Triage,
+    tenant_id: str | None = None,
+) -> MemoryRecord:
     """Create a MemoryRecord from a completed Failure + Triage pair.
 
     Root cause tokens are precomputed here at write time so index entries are
     immediately ready for scoring without re-tokenization on each query.
 
     Args:
-        failure: The CI failure payload.
-        triage:  The triage result (must be completed, not escalated).
+        failure:   The CI failure payload.
+        triage:    The triage result (must be completed, not escalated).
+        tenant_id: Deployment identifier to stamp on the record. None for
+                   deployments that have not configured tenant_id.
 
     Returns:
         A MemoryRecord ready to pass to MemoryStore.append.
@@ -293,4 +299,5 @@ def make_memory_record(failure: Failure, triage: Triage) -> MemoryRecord:
         root_cause_tokens=_tokenize(triage.output),
         severity=triage.severity.value,
         timestamp=triage.timestamp,
+        tenant_id=tenant_id,
     )

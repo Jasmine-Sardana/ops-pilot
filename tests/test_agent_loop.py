@@ -34,7 +34,12 @@ from shared.agent_loop import (
     ToolContext,
     ToolResult,
 )
+from shared.exceptions import RateLimitExceeded
 from shared.models import DiffSummary, Failure, FailureDetail, PipelineInfo
+from shared.rate_limiter import RateLimiter
+from shared.tenant_context import TenantContext
+from shared.tool_permissions import ToolPermissions
+from shared.usage_tracker import UsageTracker
 
 # ── Minimal Pydantic model used as response_model in tests ────────────────────
 # Using a simple two-field model keeps tests focused on loop behaviour,
@@ -765,3 +770,122 @@ class TestConfirmHook:
 
         assert len(tool.calls) == 1
         assert "safe_tool" not in result.failed_tools
+
+
+# ── Tests: TenantContext integration ──────────────────────────────────────────
+
+
+def _make_tenant_context(
+    allowed_tools: list[str] | None = None,
+    raise_rate_limit: bool = False,
+) -> TenantContext:
+    permissions = ToolPermissions(allowed_tools=allowed_tools or [])
+    usage_tracker = MagicMock(spec=UsageTracker)
+    rate_limiter = MagicMock(spec=RateLimiter)
+    if raise_rate_limit:
+        rate_limiter.check_and_consume.side_effect = RateLimitExceeded("limit reached")
+    return TenantContext(
+        tenant_id="test-tenant",
+        permissions=permissions,
+        usage_tracker=usage_tracker,
+        rate_limiter=rate_limiter,
+    )
+
+
+def _make_loop_with_tenant(
+    tenant_context: TenantContext,
+    responses: list[types.SimpleNamespace],
+    tools: list[Tool] | None = None,
+) -> AgentLoop[Finding]:
+    if tools is None:
+        tools = [RecordingTool()]
+    return AgentLoop(
+        tools=tools,
+        backend=_make_backend(responses),
+        domain_system_prompt="You are a test agent.",
+        response_model=Finding,
+        model="claude-sonnet-4-6",
+        max_turns=5,
+        tenant_context=tenant_context,
+    )
+
+
+class TestTenantContext:
+    async def test_rate_limit_exceeded_stops_loop_gracefully(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """When RateLimitExceeded is raised, loop exits with TURN_LIMIT outcome."""
+        tenant_ctx = _make_tenant_context(raise_rate_limit=True)
+        loop = _make_loop_with_tenant(tenant_ctx, responses=[_end_turn()])
+        result = await loop.run(
+            messages=[{"role": "user", "content": "investigate"}],
+            ctx=tool_ctx,
+        )
+        assert result.outcome == LoopOutcome.TURN_LIMIT
+        assert "rate limit" in result.last_assistant_text.lower()
+
+    async def test_usage_tracker_records_api_call(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """Usage tracker records an API call after each LLM call."""
+        tenant_ctx = _make_tenant_context()
+        loop = _make_loop_with_tenant(tenant_ctx, responses=[_end_turn()])
+        await loop.run(
+            messages=[{"role": "user", "content": "investigate"}],
+            ctx=tool_ctx,
+        )
+        tenant_ctx.usage_tracker.record_api_call.assert_called()
+
+    async def test_denied_tool_returns_error_result(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """A tool not in the allowlist returns an is_error tool result."""
+        # Only "other_tool" is allowed, but we call "record" which is blocked
+        tenant_ctx = _make_tenant_context(allowed_tools=["other_tool"])
+        tool = RecordingTool("record")
+        backend = _make_backend([
+            _response(_tool_block("record", {}, "t1")),
+            _end_turn(),
+        ])
+        loop = AgentLoop(
+            tools=[tool],
+            backend=backend,
+            domain_system_prompt="You are a test agent.",
+            response_model=Finding,
+            model="claude-sonnet-4-6",
+            max_turns=5,
+            tenant_context=tenant_ctx,
+        )
+        result = await loop.run(
+            messages=[{"role": "user", "content": "investigate"}],
+            ctx=tool_ctx,
+        )
+        # Tool should not have executed
+        assert len(tool.calls) == 0
+        assert "record" in result.failed_tools
+
+    async def test_allowed_tool_executes_normally(
+        self, tool_ctx: ToolContext
+    ) -> None:
+        """A tool in the allowlist executes without restriction."""
+        tenant_ctx = _make_tenant_context(allowed_tools=["record"])
+        tool = RecordingTool("record")
+        backend = _make_backend([
+            _response(_tool_block("record", {}, "t1")),
+            _end_turn(),
+        ])
+        loop = AgentLoop(
+            tools=[tool],
+            backend=backend,
+            domain_system_prompt="You are a test agent.",
+            response_model=Finding,
+            model="claude-sonnet-4-6",
+            max_turns=5,
+            tenant_context=tenant_ctx,
+        )
+        result = await loop.run(
+            messages=[{"role": "user", "content": "investigate"}],
+            ctx=tool_ctx,
+        )
+        assert len(tool.calls) == 1
+        assert "record" not in result.failed_tools

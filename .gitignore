@@ -16,3 +16,9 @@ htmlcov/
 dist/
 *.egg-info/
 venv311/
+
+# Git worktrees
+.worktrees/
+
+# Usage tracking (per-deployment runtime data)
+usage/
