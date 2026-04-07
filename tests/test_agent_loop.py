@@ -34,11 +34,14 @@ from shared.agent_loop import (
     ToolContext,
     ToolResult,
 )
+from shared.audit_log import AuditLog
 from shared.exceptions import RateLimitExceeded
+from shared.explanation_gen import ExplanationGenerator
 from shared.models import DiffSummary, Failure, FailureDetail, PipelineInfo
 from shared.rate_limiter import RateLimiter
 from shared.tenant_context import TenantContext
 from shared.tool_permissions import ToolPermissions
+from shared.trust_context import TrustContext
 from shared.usage_tracker import UsageTracker
 
 # ── Minimal Pydantic model used as response_model in tests ────────────────────
@@ -891,10 +894,6 @@ class TestTenantContext:
         assert "record" not in result.failed_tools
 
 # ── Tests: TrustContext integration ───────────────────────────────────────────
-
-from shared.audit_log import AuditLog
-from shared.explanation_gen import ExplanationGenerator
-from shared.trust_context import TrustContext
 
 
 def _make_trust_context(
