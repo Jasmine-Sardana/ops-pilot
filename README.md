@@ -77,35 +77,73 @@ pipelines:
 ## How it works
 
 ```mermaid
-flowchart LR
-    A["💥 CI Failure\nGitHub · GitLab · Jenkins"] --> B
+flowchart TB
+    CI["💥 CI Failure\nGitHub · GitLab · Jenkins"] --> MON
 
-    subgraph agents ["ops-pilot agents"]
+    subgraph pipeline ["ops-pilot pipeline"]
         direction TB
-        B["👁 Monitor\npolls for failures"] --> C["🔍 Triage\nroot cause + severity"]
-        C -->|"fix_confidence\n≥ MEDIUM"| D["🔧 Fix\npatch + draft PR"]
-        C -->|"fix_confidence\n= LOW"| ESC["⚠️ Escalate\nhuman review summary"]
-        D --> E["🔔 Notify\nfix-ready alert"]
-        ESC --> E2["🔔 Notify\nhuman-review alert"]
+        MON["👁 MonitorAgent\npolls every 30 s"]
+        MON --> ROUTE["🔀 InvestigationRouter  · Phase 3\nfiles changed · diff size · log length"]
+
+        subgraph triage ["Triage — fast or deep path  · Phase 3"]
+            direction TB
+            ROUTE -->|"simple failure\nsmall diff / short log"| FAST["🔍 TriageAgent\nfast path"]
+            ROUTE -->|"complex failure\nlarge diff / rich log"| COORD["🧠 CoordinatorAgent\ndeep path"]
+            subgraph workers ["Parallel specialist workers  · Phase 3"]
+                direction LR
+                WL["📋 LogWorker\nfetches log sections"]
+                WS["📁 SourceWorker\nreads source files"]
+                WD["🔍 DiffWorker\nreads full diff hunks"]
+            end
+            COORD <-->|"spawns via\nSpawnWorkerTool"| workers
+        end
+
+        FAST --> GATE{fix_confidence?}
+        COORD --> GATE
+        GATE -->|"HIGH / MEDIUM"| FIX["🔧 FixAgent\npatch + draft PR"]
+        GATE -->|"LOW"| ESC["⚠️ EscalationSummary\nhuman review brief"]
+        FIX --> NFIX["🔔 NotifyAgent\nfix-ready alert"]
+        ESC --> NESC["🔔 NotifyAgent\nhuman-review alert"]
     end
 
-    C <--> F["☁️ LLM Backend\nAnthropic · Bedrock · Vertex AI"]
-    D <--> F
-    ESC <--> F
-
-    subgraph trust ["🔐 Trust layer (every tool call)"]
+    subgraph loop ["🔁 AgentLoop — shared execution engine  · Phases 1 & 2"]
         direction LR
-        T1["📋 Audit log\nJSONL per day"] 
-        T2["💬 Pre-action\nexplanation"]
+        REG["ToolRegistry\nREAD_ONLY · WRITE\nREQUIRES_CONFIRMATION · DANGEROUS"]
+        BUD["ContextBudget  · Phase 5\ntoken estimation · Strategy A compaction"]
     end
 
-    D -.->|"REQUIRES_CONFIRMATION\ntools"| T2
-    D -.-> T1
-    C -.-> T1
+    FAST & COORD & workers & FIX -.->|"each runs via"| loop
 
-    E --> G["📬 Slack / console"]
-    E2 --> G
-    D --> H["🔀 Draft PR\nhuman reviews & merges"]
+    MEM["📚 MemoryStore  · Phase 4\nweighted similarity retrieval\nweekly consolidation job"]
+    COORD -->|"retrieve similar\npast incidents"| MEM
+    pipeline -.->|"save incident\npost-resolution"| MEM
+
+    subgraph trust ["🔐 TrustContext  · Phase 7"]
+        direction LR
+        AUD["📋 AuditLog\none JSONL record per tool call\nper-day rotation · atomic writes"]
+        EXP["💬 ExplanationGenerator\nLLM reasoning before\nREQUIRES_CONFIRMATION tools"]
+    end
+
+    loop -.->|"every tool call"| AUD
+    loop -.->|"before write tools"| EXP
+
+    subgraph tenancy ["🏢 TenantContext  · Phase 6"]
+        direction LR
+        TID["Identity\ntenant_id · actor"]
+        PRM["PermissionsConfig\ntool allowlist"]
+        RLM["RateLimiter\nsliding window"]
+        UTK["UsageTracker\nAPI calls · tokens · incidents"]
+    end
+
+    tenancy -.->|"injected into every agent at startup"| pipeline
+
+    LLM["☁️ LLM Backend\nAnthropic · AWS Bedrock · Google Vertex AI"]
+    loop <-->|"complete_with_tools()\ncomplete()"| LLM
+    ESC <-->|"generate_escalation_summary()"| LLM
+    NFIX & NESC <-->|"generate Slack message"| LLM
+
+    NFIX & NESC --> SLACK["📬 Slack / console"]
+    FIX --> PR["🔀 Draft PR\nhuman reviews & merges"]
 ```
 
 ### The 30-second version
