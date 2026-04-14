@@ -2,6 +2,8 @@
 
 **AI agents that watch your CI/CD pipelines, diagnose failures, write the fix, and open a pull request — while your engineers sleep.**
 
+> Built by **[Adnan Khan](https://adnankhan.me)** — Sr. Director of AI Engineering · [LinkedIn](https://linkedin.com/in/passionateforinnovation) · [Portfolio](https://adnankhan.me)
+
 [![Tests](https://img.shields.io/github/actions/workflow/status/adnanafik/ops-pilot/ops-pilot-self-test.yml?label=tests&style=flat-square)](https://github.com/adnanafik/ops-pilot/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue?style=flat-square)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
