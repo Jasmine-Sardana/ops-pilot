@@ -434,4 +434,4 @@ pytest
 
 ## License
 
-MIT © 2026 — built as a portfolio project demonstrating production-quality multi-agent AI systems.
+MIT © 2026 Adnan Khan
