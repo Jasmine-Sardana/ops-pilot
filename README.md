@@ -217,6 +217,17 @@ Every command is defined in `.claude/commands/<name>.md` — edit the `.md` file
 
 ---
 
+## How is this different from…
+
+| | ops-pilot | Sweep | Copilot Workspace | Sentry Autofix | Aider |
+|---|---|---|---|---|---|
+| **Triggered by** | CI failure (autonomous) | Human-filed GitHub issue | Human opens a task | Production exception | Human CLI prompt |
+| **Scope** | CI pipeline failures only | Any feature/bug | Any coding task | Runtime errors | Any code change |
+| **Produces** | Triage + draft PR + Slack alert | Draft PR | PR | Patch suggestion in Sentry UI | Local diff |
+| **Observability** | JSONL audit log + pre-action LLM explanation | — | GitHub-native | Sentry-native | — |
+
+---
+
 ## Running tests
 
 No local Python install required — runs inside Docker:
