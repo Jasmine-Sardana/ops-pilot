@@ -4,7 +4,7 @@
 
 > **Who this is for:** platform engineering teams running 10+ services on GitHub Actions / GitLab CI / Jenkins who are tired of the 2 AM CI page.
 
-> Built by **[Adnan Khan](https://adnankhan.me)** — Sr. Director of AI Engineering · [LinkedIn](https://linkedin.com/in/passionateforinnovation) · [Portfolio](https://adnankhan.me)
+> Built by **[Adnan Khan](https://adnankhan.me)** · [LinkedIn](https://linkedin.com/in/passionateforinnovation)
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/adnanafik/ops-pilot/ops-pilot-self-test.yml?label=tests&style=flat-square)](https://github.com/adnanafik/ops-pilot/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue?style=flat-square)](https://www.python.org)
@@ -251,6 +251,12 @@ Or locally if you have Python 3.11+:
 pip install -e ".[dev]"
 pytest
 ```
+
+---
+
+## About the author
+
+Adnan Khan builds AI systems for platform engineering teams. [LinkedIn](https://linkedin.com/in/passionateforinnovation) · [adnankhan.me](https://adnankhan.me)
 
 ---
 
