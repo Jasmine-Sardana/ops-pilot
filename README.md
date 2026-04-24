@@ -228,6 +228,13 @@ Every command is defined in `.claude/commands/<name>.md` — edit the `.md` file
 
 ---
 
+## Related
+
+**[retro-pilot](https://github.com/adnanafik/retro-pilot)** — autonomous post-mortem generator.
+ops-pilot catches the failure and opens a PR. retro-pilot takes the resolved incident and produces a structured post-mortem stored in a searchable knowledge base.
+
+---
+
 ## Running tests
 
 No local Python install required — runs inside Docker:
