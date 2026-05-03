@@ -70,18 +70,20 @@ def step(agent: str, msg: str, color: str = CYAN) -> None:
 def validate_env() -> None:
     """Exit with a clear message if required environment variables are missing."""
     demo_mode = os.getenv("DEMO_MODE", "false").lower() == "true"
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
 
-    if not demo_mode and not api_key:
+    if demo_mode:
         return
-    print(
-        f"\n{RED}{BOLD}ops-pilot: missing required environment variable{RESET}\n\n"
-        f"  {BOLD}ANTHROPIC_API_KEY{RESET} is not set.\n\n"
-        f"Please set it in your .env file.\n"
-        f"See Quickstart: https://github.com/adnanafik/ops-pilot#quickstart\n",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+
+    if not api_key:
+        print(
+            f"\n{RED}{BOLD}ops-pilot: missing required environment variable{RESET}\n\n"
+            f"  {BOLD}ANTHROPIC_API_KEY{RESET} is not set.\n\n"
+            f"Please set it in your .env file.\n"
+            f"See Quickstart: https://github.com/adnanafik/ops-pilot#quickstart\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────────
@@ -285,6 +287,7 @@ def main() -> None:
     parser.add_argument("--once", action="store_true", help="Process current failures and exit")
     parser.add_argument("--dry-run", action="store_true", help="Triage only — no PRs or Slack")
     args = parser.parse_args()
+    validate_env()
     cfg = load_config(args.config)
 
     logging.basicConfig(
